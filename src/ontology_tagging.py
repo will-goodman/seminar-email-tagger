@@ -1,27 +1,36 @@
-from os import listdir
-from os.path import isfile, join
-import re
-import nltk
-import sys, http.client, urllib.request, urllib.parse, urllib.error, json
+from nltk.tag import DefaultTagger, UnigramTagger, BigramTagger, TrigramTagger
 from nltk.corpus import treebank
 from nltk.corpus import wordnet as wn
-from nltk.tag import DefaultTagger, UnigramTagger, BigramTagger, TrigramTagger
-import gensim.downloader as api
-from pprint import pprint
 from file_locations import TRAINING_PATH, TEST_PATH, COMMON_WORDS_PATH
+from os.path import isfile, join
+from os import listdir
+from pprint import pprint
+import gensim.downloader as api
+import re
+import nltk
+import os
 
-# constants
-TRAIN_SENTS = treebank.tagged_sents()
-UNIGRAM = UnigramTagger(TRAIN_SENTS, backoff=DefaultTagger('NN'))
-BIGRAM = BigramTagger(TRAIN_SENTS, backoff=UNIGRAM)
-TRIGRAM = TrigramTagger(TRAIN_SENTS, backoff=BIGRAM)
+TRAINING_SENTS = treebank.tagged_sents()
+UNIGRAM = UnigramTagger(TRAINING_SENTS, backoff=DefaultTagger('NN'))
+BIGRAM = BigramTagger(TRAINING_SENTS, backoff=UNIGRAM)
+TRIGRAM = TrigramTagger(TRAINING_SENTS, backoff=BIGRAM)
 STOPWORDS = set(nltk.corpus.stopwords.words('english'))
-IRRELEVANT_WORDS = ["talk", "seminar", "lecture"]
 WORD_VECTORS = api.load("glove-wiki-gigaword-100")
 # the files to be trained on
 TRAINING_FILES = [f for f in listdir(TRAINING_PATH) if isfile(join(TRAINING_PATH, f))]
 # load the files to be tested
 TEST_FILES = [f for f in listdir(TEST_PATH) if isfile(join(TEST_PATH, f))]
+
+# Manual list of words to be considered "irrelevant"
+IRRELEVANT_WORDS = ["talk", "seminar", "lecture"]
+
+# manually created ontology tree, which is later extended
+TREE = {
+    "science": {},
+    "maths": {},
+    "engineering": {},
+    "medicine": {}
+}
 
 # code to convert POS tags into the right form for lemmatization
 # https://stackoverflow.com/questions/25534214/nltk-wordnet-lemmatizer-shouldnt-it-lemmatize-all-inflections-of-a-word
@@ -46,77 +55,102 @@ POS_TO_WORDNET = {
 
 }
 
-# manually created ontology tree
-TREE = {"science": {},
-        "maths": {},
-        "engineering": {},
-        "medicine": {},
-        }
 
-
-# reads in the list of the 1000 most common English words
 def read_common_words():
-    file = open(COMMON_WORDS_PATH, "r")
-    file_text = file.read()
-    words = []
-    for line in file_text:
-        words.append(line)
+    """
+    Reads in the file containing the most common words.
+    :return: A list of the most common English words.
+    """
+    most_common_words = []
+    with open(COMMON_WORDS_PATH, "r") as words_file:
+        for line in words_file.read():
+            most_common_words.append(line)
 
-    return words
+    return most_common_words
 
 
-# pulls all the relevant information from the email
-def pull_info(text, common_words):
-    words = []
-    tokenised = nltk.word_tokenize(text.lower())
-    tokenised = [token for token in tokenised if token not in STOPWORDS]
-    for token in tokenised:
-        words.append(token)
-    relevant_words = [i for i in tokenised + common_words if i not in common_words]
+def retrieve_tags(text, common_words):
+    """
+    Pulls all the tagged information from the email.
+    :param text: The email text.
+    :param common_words: A list of the most common words.
+    :return: The tagged information, with any of the common words removed.
+    """
+    tokens = nltk.word_tokenize(text.lower())
+    tokens_stopwords_removed = [token for token in tokens if token not in STOPWORDS]
+
+    relevant_words = [i for i in tokens_stopwords_removed if i not in common_words]
     tagged = TRIGRAM.tag(relevant_words)
     return tagged
 
 
-# check to see if any of the words in the tree are in the email
 def check_tree(text, current_tree):
-    words = []
+    """
+    Checks to see if any of the words in the tree are in the email.
+    :param text: The email text.
+    :param current_tree: The tree of words to check.
+    :return: A list of any words which are in the tree and email.
+    """
+    words_acc = []
+    lowered_email_text = text.lower()
     for key in current_tree:
-        if (key.lower() in text.lower()):
-            words.append(key)
-        words += check_tree(text, current_tree[key])
-    return words
+        if key.lower() in lowered_email_text:
+            words_acc.append(key)
+        words_acc.extend(check_tree(text, current_tree[key]))
+    return words_acc
 
 
-# get the lemmas of all the words pulled from the email
 def get_lemmas(words):
+    """
+    Computes the lemmas of all words pulled from the email.
+    :param words: The words (POS tagged) from the email.
+    :return: A list of the words' lemmas.
+    """
+    digit_regex = re.compile(r'\d')
+
     lemmatizer = nltk.stem.wordnet.WordNetLemmatizer()
     lemmas = []
     for word in words:
-        part_of_speech = ""
         try:
+            '''
+            The words have been POS tagged and are a tuple in the following form:
+            (word, POS TAG)
+               0       1
+            '''
             part_of_speech = POS_TO_WORDNET[word[1]]
-        except:
+            lemma = lemmatizer.lemmatize(word[0], pos=part_of_speech).lower()
+
+            if lemma not in IRRELEVANT_WORDS and digit_regex.search(lemma) is None:
+                lemmas.append(lemma)
+        except KeyError:
             pass
-        if (part_of_speech != ""):
-            lemma = lemmatizer.lemmatize(word[0], pos=part_of_speech)
-            if (lemma.lower() not in IRRELEVANT_WORDS and re.search(r'\d', lemma) is None):
-                lemmas.append(lemma.lower())
+
     return lemmas
 
 
-# compares the similarity between two words using FastText
 def get_similarity(email_word, tree_word):
+    """
+    Uses FastText to compute the similarity between two words.
+    :param email_word: The word from the email to compare.
+    :param tree_word: The word from the ontology tree to compare.
+    :return: The similarity score of the two words.
+    """
     try:
         sim_score = WORD_VECTORS.similarity(email_word, tree_word)
-    except:
-        sim_score = 0
-    return sim_score
+        return sim_score
+    except KeyError:
+        return 0
 
 
-# finds hyponyms and extends the ontology tree
 def extend_tree(current_tree, count_depth):
+    """
+    Finds hyponyms and uses them to extend the ontology tree.
+    :param current_tree: The tree to be extended.
+    :param count_depth: How many more rows of extensions to perform.
+    :return: The extended tree.
+    """
     for key in current_tree:
-        if (len(current_tree[key]) == 0 and count_depth > 0):
+        if len(current_tree[key]) == 0 and count_depth > 0:
             synsets = wn.synsets(key)
             new_branches = {}
             for synset in synsets:
@@ -124,71 +158,98 @@ def extend_tree(current_tree, count_depth):
                 for hyponym in hyponyms:
                     lemmas = hyponym.lemmas()
                     for lemma in lemmas:
-                        multiple_word = lemma.name().split('_')
-                        if (len(multiple_word) == 1):
-                            new_branches[lemma.name()] = new_branches[lemma.name()] = {}
-                        else:
-                            first_element = multiple_word[0]
-                            multiple_word = multiple_word[1:]
+                        '''
+                        The lemmatizer puts underscores between multiple word lemmas.
+                        E.g. information_technology
+                        These are split up and the latter words are put in the next row down in the tree.
+                        '''
+                        lemma_name = lemma.name()
+                        if '_' in lemma_name:
+                            multiple_words = lemma_name.split('_')
+                            first_lemma = multiple_words[0]
+                            remaining_lemmas = multiple_words[1:]
+
+                            remaining_lemmas.reverse()
                             furthest_branch = {}
-                            # last_branch = {}
-                            multiple_word.reverse()
-                            for word in multiple_word:
-                                current_branch = {}
-                                current_branch[word] = furthest_branch
+                            current_branch = {}
+                            for word in remaining_lemmas:
+                                current_branch = {word: furthest_branch}
                                 furthest_branch = current_branch
-                            new_branches[first_element] = current_branch
-            current_tree[key] = new_branches
-            current_tree[key] = extend_tree(current_tree[key], count_depth - 1)
+                            new_branches[first_lemma] = current_branch
+                        else:
+                            new_branches[lemma_name] = {}
+
+            current_tree[key] = extend_tree(new_branches, count_depth - 1)
+
     return current_tree
 
 
-# extend the tree
-new_tree = extend_tree(TREE, 2)
-pprint(new_tree)
-
-# loops though each email and appropriately classifies it
-for file in TEST_FILES:
-    test_file = str(file)
-    file_text = open(TEST_PATH + "/" + test_file, "r").read()
+def classify_email(text, tree):
+    """
+    Classifies an email according to the ontology tree.
+    :param text: The email text.
+    :param tree: The tree to be used for classification.
+    :return: The classification of the email.
+    """
     common_words = read_common_words()
-    words = pull_info(file_text, common_words)
+    words = retrieve_tags(text, common_words)
+
     lemmas = get_lemmas(words)
-    lemmas += check_tree(file_text, TREE)
-    current_tree = new_tree
+    lemmas.extend(check_tree(text, tree))
+
+    # loop until the best tag is found
     classified = False
     tree_acc = []
     saved_sim_score = 0
-    # loop until the best tag is found
-    while (classified == False):
+    while not classified:
         # get the highest average similarity score of each node in the next level of the tree
         best_key = ""
         highest_sim_score = 0
-        sim_score = 0
-        for key in current_tree:
-            count_lemmas = 0
-            sim_avg = 0
-            for lemma in lemmas:
-                sim_avg += get_similarity(lemma, key)
-                count_lemmas += 1
-            try:
-                sim_avg = sim_avg / count_lemmas
-            except:
+        for key in tree:
+            num_lemmas = len(lemmas)
+
+            # Avoid ZeroDivisionError
+            if num_lemmas > 0:
+                sim_acc = 0
+                for lemma in lemmas:
+                    sim_acc += get_similarity(lemma, key)
+
+                sim_avg = sim_acc / num_lemmas
+            else:
                 sim_avg = 0
-            if (sim_avg > highest_sim_score):
+
+            # if the average of this route is higher, then we plan to follow this route
+            if sim_avg > highest_sim_score:
                 best_key = key
                 highest_sim_score = sim_avg
+
         # if the current tag has a higher score then we don't proceed
-        if (highest_sim_score > saved_sim_score):
-            if (best_key != ""):
-                tree_acc.append(best_key)
-                saved_sim_score = highest_sim_score
-                current_tree = current_tree[best_key]
-                if (len(current_tree) == 0):
+        if highest_sim_score > saved_sim_score:
+            if best_key != "":
+                tree = tree[best_key]
+                if len(tree) == 0:
                     classified = True
+                else:
+                    tree_acc.append(best_key)
+                    saved_sim_score = highest_sim_score
             else:
                 classified = True
         else:
             classified = True
-    print(test_file)
-    print(str(tree_acc))
+
+    return tree_acc
+
+
+# extend the tree
+extended_tree = extend_tree(TREE, 2)
+pprint(extended_tree)
+
+# loops though each email and appropriately classifies it
+for file in TEST_FILES:
+    file_path = os.path.join(TEST_PATH, file)
+    with open(file_path) as email_file:
+        file_text = email_file.read()
+        classification = classify_email(file_text, extended_tree)
+
+        print(file)
+        print(str(classification))
