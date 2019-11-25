@@ -12,6 +12,7 @@ from file_locations import TRAINING_CORPORA_PATH, STANFORD_TAGGER_PATH, STANFORD
 # constants
 TAGS = ["<date>", "</date>", "<stime>", "</stime>", "<etime>", "</etime>", "<location>", "</location>", "<speaker>",
         "</speaker>", "<sentence>", "</sentence>"]
+TITLES = ["mr", "mrs", "mr", "dr", "professor", "prof", "doctor", "md", "phd"]
 STIME_TAG = "stime"
 ETIME_TAG = "etime"
 PARAGRAPH_TAG = "paragraph"
@@ -121,18 +122,25 @@ def check_header(header, tags):
         else:
             tags.add((time, STIME_TAG))
     if place is not None:
+        # Places:
         place_name = place.group(1)
-        if (place_name is None):
+        if place_name is None:
+            # Locations:
             place_name = place.group(2)
         tags.add((place_name, LOCATION_TAG))
+        # Add location to list of known locations
         locations.add(place_name)
     if speaker is not None:
+        # Who:
         speaker_name = speaker.group(1)
         if speaker_name is None:
+            # Speaker:
             speaker_name = speaker.group(4)
+        # Remove new line
         speaker_name = speaker_name.strip()
-        if speaker_name[len(speaker_name) - 1] in string.punctuation:
-            speaker_name = speaker_name[:len(speaker_name) - 1].strip()
+        # Often a punctuation character at the end, which must be removed.
+        if speaker_name[-1:] in string.punctuation:
+            speaker_name = speaker_name[:-1].strip()
         tags.add((speaker_name, SPEAKER_TAG))
     return tags
 
@@ -144,7 +152,7 @@ def check_noun(word):
     :return: Whether the noun is a place or person.
     """
     wiki_results = query_wiki(word)
-    try:
+    if wiki_results is not None:
         if "born" in wiki_results:
             return "person"
         elif word in NAMES:
@@ -153,7 +161,7 @@ def check_noun(word):
             return "place"
         else:
             return "place"
-    except:
+    else:
         # if there are no wiki results then we can assume they're a person
         return "person"
 
@@ -166,21 +174,25 @@ def rel_extract(body, tags):
     :return: The updated list of accumulated tagged strings.
     """
     find_rels = re.search(
-        r'((\w*\s*)?\w*)(\s*from\s*((the)?\s*university\s*of\s*\w*|\w*\s*university))?\s*(will|is\sgoing\sto)\s*(present|speak|talk|lecture|deliver\s*a\s*(guest\s*)?(lecture|talk|presentation)?)\s*(on\s*the\s*topic|in|about|on)\s*(.*)\.',
+        r'((\w*\s*)?\w*)(\s*from\s*((the)?\s*university\s*of\s*\w*|\w*\s*university))?\s*(will|is\sgoing\sto)\s*('
+        r'present|speak|talk|lecture|deliver\s*a\s*(guest\s*)?(lecture|talk|presentation)?)\s*('
+        r'on\s*the\s*topic|in|about|on)\s*(.*)\.',
         body, flags=re.I)
     if find_rels is not None:
         speaker = find_rels.group(1)
         if check_noun(speaker) == "person":
             tags.add((speaker, SPEAKER_TAG))
     find_rels = re.search(
-        r'((\w*\s*)?\w*)(\s*from\s*((the)?\s*university\s*of\s*\w*|\w*\s*university))?\s*(will|is\sgoing\sto)\s*(present|speak|talk|lecture|deliver\s*a\s*(guest\s*)?(lecture|talk|presentation)?)',
+        r'((\w*\s*)?\w*)(\s*from\s*((the)?\s*university\s*of\s*\w*|\w*\s*university))?\s*(will|is\sgoing\sto)\s*('
+        r'present|speak|talk|lecture|deliver\s*a\s*(guest\s*)?(lecture|talk|presentation)?)',
         body, flags=re.I)
     if find_rels is not None:
         speaker = find_rels.group(1)
         if check_noun(speaker) == "person":
             tags.add((speaker, SPEAKER_TAG))
     find_rels = re.search(
-        r'.*\sThe\s(seminar|lecture|talk|presentation)\s(will|is going to)\s(be\s(held\s)?in|hosted in)\s(.*)\sat\s(.*)\son\s([^!\.]*)',
+        r'.*\sThe\s(seminar|lecture|talk|presentation)\s(will|is going to)\s(be\s(held\s)?in|hosted in)\s(.*)\sat\s('
+        r'.*)\son\s([^!\.]*)',
         body, flags=re.I)
     if find_rels is not None:
         location = find_rels.group(5)
@@ -190,7 +202,8 @@ def rel_extract(body, tags):
         tags.add((time, STIME_TAG))
     else:
         find_rels = re.search(
-            r'.*\sThe\s(seminar|lecture|talk|presentation)\s(will|is going to)\s(be\s(held\s)?in|hosted in)\s(.*)\son\s(.*)\sat\s([^!\.]*)',
+            r'.*\sThe\s(seminar|lecture|talk|presentation)\s(will|is going to)\s(be\s(held\s)?in|hosted in)\s('
+            r'.*)\son\s(.*)\sat\s([^!\.]*)',
             body, flags=re.I)
         if find_rels is not None:
             location = find_rels.group(5)
@@ -199,9 +212,8 @@ def rel_extract(body, tags):
             locations.add(location)
             tags.add((time, STIME_TAG))
         else:
-            find_rels = re.search(
-                r'.*\sThe\s(seminar|lecture|talk|presentation)\s(will|is going to)\s(be\s(held\s)?in|hosted in)\s(.*)\.',
-                body, flags=re.I)
+            find_rels = re.search(r'.*\sThe\s(seminar|lecture|talk|presentation)\s(will|is going to)\s(be\s('
+                                  r'held\s)?in|hosted in)\s(.*)\.', body, flags=re.I)
             if find_rels is not None:
                 location = find_rels.group(5)
                 tags.add((location, LOCATION_TAG))
@@ -227,22 +239,28 @@ def tag_sents_and_paras(text):
     :param text: The text to tag.
     :return: The list of tokens with paragraph and sentence tags added.
     """
-    paras = text.split("\n\n")
-    paras = paras[:len(paras) - 1]
+    '''
+    We assume each paragraph is split by an empty line.
+    The last item will probably be empty, as there is often free lines at the end of the file, so it is removed
+    '''
+    paras = text.split("\n\n")[:-1]
 
     sents_tagged = []
     count_sents_tagged = 0
     for para in paras:
         tokenised = nltk.sent_tokenize(para)
         para_start_index = count_sents_tagged
+
+        # Loop until enough sentences for the paragraph have been found.
         all_sents = True
         for token in tokenised:
-            if (token[len(token) - 1] == "." or token[len(token) - 1] == "!" or token[len(token) - 1] == "?" and len(
-                    token) > sentence_length_lower_bound and len(token) < sentence_length_upper_bound):
+            last_char = token[-1:]
+            sent_length = len(token)
+            if last_char == "." or last_char == "!" or last_char == "?" and sentence_length_lower_bound < sent_length < sentence_length_upper_bound:
                 sents_tagged.append("<sentence>")
-                sents_tagged.append(token[:len(token) - 1])
+                sents_tagged.append(token[:-1])
                 sents_tagged.append("</sentence>")
-                sents_tagged.append(token[len(token) - 1])
+                sents_tagged.append(last_char)
                 count_sents_tagged += 4
             else:
                 all_sents = False
@@ -267,16 +285,22 @@ def tag_body(text, tags):
     :return: The tagged text.
     """
     for tag in tags:
+        '''
+        The tag is in the following format:
+        (string, tag)
+        '''
         tag_string = tag[0]
         tag_tag = tag[1]
-        if (tag_tag == STIME_TAG or tag_tag == ETIME_TAG) and tag_string[len(tag_string) - 1] == ".":
-            tag_string = tag_string[:len(tag_string) - 1]
+        # Remove full stops from times as they definitely don't belong
+        if (tag_tag == STIME_TAG or tag_tag == ETIME_TAG) and tag_string[-1:] == ".":
+            tag_string = tag_string[:-1]
+
+        # Find instances of the tagged string and tag it
         for index in re.finditer(re.escape(tag_string), text):
-            start_index = index.start()
-            end_index = index.end()
-            before_substring = text[:start_index]
-            after_substring = text[end_index:]
-            text = before_substring + "<" + tag_tag + ">" + tag_string + "</" + tag_tag + ">" + after_substring
+            before_substring = text[:index.start()]
+            after_substring = text[index.end():]
+            text = f'{before_substring} <{tag_tag}>{tag_string} </{tag_tag}>{after_substring}'
+
     return text
 
 
@@ -297,7 +321,7 @@ def tag_header(header, tags):
 
 def find_names(text, tags):
     """
-    Finds names on lines of their own. These are assumed to be a speaker name if no speaker has been found.
+    Finds names with a Stanford tagger. These are assumed to be a speaker name if no speaker has been found.
     :param text: The text to search.
     :param tags: A list of accumulated strings which have been tagged so far.
     :return: The updated list of accumulated tags.
@@ -308,18 +332,19 @@ def find_names(text, tags):
     tokenised = nltk.word_tokenize(text)
     classified = stanford_tagger.tag(tokenised)
 
-    TITLES = ["mr", "mrs", "mr", "dr", "professor", "prof", "doctor", "md", "phd"]
-
     names = []
     current_name = ""
     found_name = False
     for token in classified:
+        '''
+        The tag is in the following format:
+        (string, tag)
+        '''
         token_word = token[0]
         token_tag = token[1]
         is_shortened_name = re.match("^\w+\.$", token_word)
-        if (
-                token_tag == "PERSON" or token_word in NAMES or token_word.lower() in TITLES or is_shortened_name is not None or token_word in string.punctuation):
-            if found_name == True and token_word not in string.punctuation:
+        if token_tag == "PERSON" or token_word in NAMES or token_word.lower() in TITLES or is_shortened_name is not None or token_word in string.punctuation:
+            if found_name is True and token_word not in string.punctuation:
                 current_name += " " + token_word
             else:
                 current_name += token_word
@@ -348,45 +373,48 @@ def find_locations(text, tags):
     """
     lower_text = text.lower()
     for location in locations:
-        lower_location = location.lower()
-        if lower_location in lower_text:
+        if location.lower() in lower_text:
             tags.add((location, LOCATION_TAG))
 
     return tags
 
 
 def tag_email(email_text):
+    """
+    Performs information extraction on an email and adds tags.
+    :param email_text: The email to tag.
+    :return: The tagged email.
+    """
+    '''
+    Split the email into header and body.
+    return value is: (header, body)
+    '''
     formatted = format_file(email_text)
     header = formatted[0]
     body = formatted[1]
 
-    # header
     tags = set([])
     tags = check_header(header, tags)
 
-    # body
-    # sometimes there are embedded emails, with a second header. If we are missing any information, we can check the body
-    missing_tag = False
-    for tag in tags:
-        if tag[1] == SPEAKER_TAG or tag[1] == LOCATION_TAG or tag[1] == STIME_TAG or tag[1] == ETIME_TAG:
-            missing_tag = True
+    # A lot of emails have nested headers
+    tags = check_header(body, tags)
 
-    if missing_tag:
-        tags = check_header(body, tags)
-
-    # tag sentences and then paragraphs
     sent_and_para_tagged = tag_sents_and_paras(body)
 
-    # perform relation extraction on the body to get information
     tags = rel_extract(body, tags)
 
     # if we haven't found either a speaker or a location we can fall back on the backup-methods
     speaker_tagged = False
     location_tagged = False
     for tag in tags:
-        if tag[1] == SPEAKER_TAG:
+        '''
+        The tag is in the following format:
+        (string, tag)
+        '''
+        tag_tag = tag[1]
+        if tag_tag == SPEAKER_TAG:
             speaker_tagged = True
-        elif tag[1] == LOCATION_TAG:
+        elif tag_tag == LOCATION_TAG:
             location_tagged = True
 
     if not speaker_tagged:
@@ -427,7 +455,6 @@ def tag_email(email_text):
             detokenised += token
         count_tokens += 1
 
-    # add tags to the header
     tagged_header = tag_header(header, tags)
 
     # put the email back together
