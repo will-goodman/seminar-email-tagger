@@ -2,11 +2,13 @@ from nltk.tag import DefaultTagger, UnigramTagger, BigramTagger, TrigramTagger, 
 from nltk.corpus import treebank, names
 from os.path import isfile, join
 from os import listdir
-from information_extraction_utils import detokenize, format_file, query_wiki
 import os
 import nltk.data
 import re
 import string
+from requests.exceptions import RequestException
+from requests.utils import requote_uri
+import requests
 from file_locations import TRAINING_CORPORA_PATH, STANFORD_TAGGER_PATH, STANFORD_TAGGER_DICTIONARY, JAVA_PATH
 
 # constants
@@ -30,6 +32,95 @@ os.environ['JAVAHOME'] = JAVA_PATH
 sentence_length_upper_bound = 0
 sentence_length_lower_bound = 0
 locations = set([])
+
+
+def format_file(file):
+    """
+    Splits an email into the header and body.
+    :param file: The complete email
+    :return: header: The email header.
+    :return: body: The body (including any nested headers).
+    """
+    # We normally only expect a header and a body, hence only a single split
+    separated = file.split('\n\n', 1)
+    if len(separated) == 2:
+        # separated = [header, body]
+        header = separated[0]
+        body = separated[1]
+    else:
+        header = ""
+        body = file
+
+    return header, body
+
+
+def detokenize(tokens):
+    """
+    Puts the tokens back into sentences.
+    :param tokens: A list of tokens.
+    :return: The tokens put back into a single string.
+    """
+    line = ""
+    count_tokens = 0
+    for token in tokens:
+        if len(token) > 0:
+            if count_tokens > 0:
+                previous_token = tokens[count_tokens - 1]
+                if token == "<sentence>":
+                    '''
+                    Add space after after end of sentence.
+                    e.g. The dog jumped. The lazy fox.
+                                        ^
+                    '''
+                    if previous_token in string.punctuation:
+                        line += " " + token
+                elif token in TAGS:
+                    line += token
+                    '''
+                    No space between word and trailing punctuation.
+                    E.g. The dog jumped.
+                    '''
+                elif token[0] in string.punctuation:
+                    line += token
+                else:
+                    '''
+                    Put space after closing tag.
+                    e.g. </sentence> <sentence>
+                    '''
+                    if previous_token in TAGS and "/" not in previous_token:
+                        line += token
+                    else:
+                        line += " " + token
+            else:
+                line += token
+            count_tokens += 1
+    return line
+
+
+def wikify(query):
+    """
+    Performs wikification by sending a query to the Wikipedia API.
+    :param query: The query to send to the API.
+    :return: The content of the HTTP response.
+    """
+    try:
+        '''
+        Removes any illegal characters in URLs e.g. spaces
+        '''
+        query = requote_uri(query)
+
+        query_parameters = {
+            "action": "query",
+            "list": "search",
+            "format": "json",
+            "srsearch": query
+        }
+        response = requests.get('https://en.wikipedia.org/w/api.php', params=query_parameters)
+
+        # return the response content
+        return response.text
+    except RequestException:
+        return None
 
 
 def train_para_tagger():
@@ -151,7 +242,7 @@ def check_noun(word):
     :param word: The noun to check.
     :return: Whether the noun is a place or person.
     """
-    wiki_results = query_wiki(word)
+    wiki_results = wikify(word)
     if wiki_results is not None:
         if "born" in wiki_results:
             return "person"
