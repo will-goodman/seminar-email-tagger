@@ -1,10 +1,12 @@
-from file_locations import TRAINING_CORPORA_PATH, TEST_TAGGED_PATH, TEST_UNTAGGED_PATH, FILE_OUTPUT_PATH
 from os import listdir
 from os.path import isfile, join
 from nltk import word_tokenize
 import information_extraction
 import re
 import os
+
+TEST_TAGGED_PATH = '../test/tagged'
+FILE_OUTPUT_PATH = '../tagged/'
 
 TAGS = ["<stime>", "<etime>", "<location>", "<speaker>", "<sentence>", "<paragraph>"]
 STIME_TAG = "<stime>"
@@ -13,6 +15,7 @@ LOCATION_TAG = "<location>"
 SPEAKER_TAG = "<speaker>"
 PARAGRAPH_TAG = "<paragraph>"
 SENTENCE_TAG = "<sentence>"
+
 TEST_FILES = [f for f in listdir(TEST_TAGGED_PATH) if isfile(join(TEST_TAGGED_PATH, f))]
 NUM_FILES = len(TEST_FILES)
 

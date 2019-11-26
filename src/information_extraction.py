@@ -1,17 +1,19 @@
 from nltk.tag import DefaultTagger, UnigramTagger, BigramTagger, TrigramTagger, StanfordNERTagger
 from nltk.corpus import treebank, names
+from requests.exceptions import RequestException
+from requests.utils import requote_uri
 from os.path import isfile, join
 from os import listdir
-import os
 import nltk.data
 import re
 import string
-from requests.exceptions import RequestException
-from requests.utils import requote_uri
 import requests
-from file_locations import TRAINING_CORPORA_PATH, STANFORD_TAGGER_PATH, STANFORD_TAGGER_DICTIONARY, JAVA_PATH
 
-# constants
+
+TRAINING_CORPORA_PATH = '../training/tagged'
+STANFORD_TAGGER_PATH = '../resources/stanford-ner.jar'
+STANFORD_TAGGER_DICTIONARY = '../resources/english.all.3class.distsim.crf.ser.gz'
+
 TAGS = ["<date>", "</date>", "<stime>", "</stime>", "<etime>", "</etime>", "<location>", "</location>", "<speaker>",
         "</speaker>", "<sentence>", "</sentence>"]
 TITLES = ["mr", "mrs", "mr", "dr", "professor", "prof", "doctor", "md", "phd"]
@@ -21,12 +23,12 @@ PARAGRAPH_TAG = "paragraph"
 SENTENCE_TAG = "sentence"
 LOCATION_TAG = "location"
 SPEAKER_TAG = "speaker"
+
 TRAIN_SENTS = treebank.tagged_sents()
 UNIGRAM = UnigramTagger(TRAIN_SENTS, backoff=DefaultTagger('NN'))
 BIGRAM = BigramTagger(TRAIN_SENTS, backoff=UNIGRAM)
 TRIGRAM = TrigramTagger(TRAIN_SENTS, backoff=BIGRAM)
 NAMES = names.words('male.txt') + names.words('female.txt') + names.words('family.txt')
-os.environ['JAVAHOME'] = JAVA_PATH
 
 # global variables
 sentence_length_upper_bound = 0
@@ -44,7 +46,10 @@ def format_file(file):
     # We normally only expect a header and a body, hence only a single split
     separated = file.split('\n\n', 1)
     if len(separated) == 2:
-        # separated = [header, body]
+        '''
+        separated is in the following format:
+        [header, body]
+        '''
         header = separated[0]
         body = separated[1]
     else:

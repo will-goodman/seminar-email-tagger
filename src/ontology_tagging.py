@@ -1,7 +1,6 @@
 from nltk.tag import DefaultTagger, UnigramTagger, BigramTagger, TrigramTagger
 from nltk.corpus import treebank
 from nltk.corpus import wordnet as wn
-from file_locations import TRAINING_PATH, TEST_PATH, COMMON_WORDS_PATH
 from os.path import isfile, join
 from os import listdir
 from pprint import pprint
@@ -10,15 +9,17 @@ import re
 import nltk
 import os
 
+
+TEST_PATH = '../test/untagged'
+COMMON_WORDS_PATH = '../resources/1-1000.txt'
+
 TRAINING_SENTS = treebank.tagged_sents()
 UNIGRAM = UnigramTagger(TRAINING_SENTS, backoff=DefaultTagger('NN'))
 BIGRAM = BigramTagger(TRAINING_SENTS, backoff=UNIGRAM)
 TRIGRAM = TrigramTagger(TRAINING_SENTS, backoff=BIGRAM)
+
 STOPWORDS = set(nltk.corpus.stopwords.words('english'))
 WORD_VECTORS = api.load("glove-wiki-gigaword-100")
-# the files to be trained on
-TRAINING_FILES = [f for f in listdir(TRAINING_PATH) if isfile(join(TRAINING_PATH, f))]
-# load the files to be tested
 TEST_FILES = [f for f in listdir(TEST_PATH) if isfile(join(TEST_PATH, f))]
 
 # Manual list of words to be considered "irrelevant"
