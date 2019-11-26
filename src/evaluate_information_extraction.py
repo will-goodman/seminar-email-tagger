@@ -154,10 +154,6 @@ def evaluate(my_tagged, test_tagged, tags_precision, tags_recall, tags_f_measure
     return tags_precision, tags_recall, tags_f_measure
 
 
-# train the tagger code
-information_extraction.train_para_tagger()
-information_extraction.train_location_tagger()
-
 tags_precision = {STIME_TAG: 0,
                   ETIME_TAG: 0,
                   LOCATION_TAG: 0,

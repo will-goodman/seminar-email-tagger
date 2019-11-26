@@ -30,11 +30,6 @@ BIGRAM = BigramTagger(TRAIN_SENTS, backoff=UNIGRAM)
 TRIGRAM = TrigramTagger(TRAIN_SENTS, backoff=BIGRAM)
 NAMES = names.words('male.txt') + names.words('female.txt') + names.words('family.txt')
 
-# global variables
-sentence_length_upper_bound = 0
-sentence_length_lower_bound = 0
-locations = set([])
-
 
 def format_file(file):
     """
@@ -131,10 +126,8 @@ def wikify(query):
 def train_para_tagger():
     """
     Trains the paragraph tagger by calculating the average length of a sentence in the training set.
-    :return:
+    :return: The lower and upper bounds for accepted sentence length in a paragraph.
     """
-    global sentence_length_lower_bound
-    global sentence_length_upper_bound
     training_files = [f for f in listdir(TRAINING_CORPORA_PATH) if isfile(join(TRAINING_CORPORA_PATH, f))]
 
     num_sentences = 0
@@ -178,14 +171,16 @@ def train_para_tagger():
     sentence_length_upper_bound = avg_sentence_length * 1.5
     sentence_length_lower_bound = avg_sentence_length * 0.5
 
+    return sentence_length_lower_bound, sentence_length_upper_bound
+
 
 def train_location_tagger():
     """
     Pulls all of the locations out of the training set.
-    :return:
+    :return: A list of locations found in the training set.
     """
     training_files = [f for f in listdir(TRAINING_CORPORA_PATH) if isfile(join(TRAINING_CORPORA_PATH, f))]
-    global locations
+    locations = set([])
     for file in training_files:
         file_text = open(TRAINING_CORPORA_PATH + "/" + file, "r").read()
         file_locations = re.findall(r'(<location>?)(.*)(</location>?)', file_text)
@@ -196,13 +191,16 @@ def train_location_tagger():
                 location_name = location_name.replace(tag[0] + "/" + tag[0:], "")
                 locations.add(location_name)
 
+    return locations
 
-def check_header(header, tags):
+
+def check_header(header, tags, locations):
     """
     Uses regular expressions on the header to pull out relevant information.
     :param header: The email header.
     :param tags: The accumulated strings which have been tagged. E.g. [('dave', 'speaker')]
-    :return: The updated tags list.
+    :param locations: List of previously found locations.
+    :return: The updated tags list, and updated known locations.
     """
     time = re.search(r'Times?:\s*(.*)\n', header, flags=re.I)
     place = re.search(r'Places?:\s*(.*)\n|Locations?:\s*(.*)\n', header, flags=re.I)
@@ -238,7 +236,7 @@ def check_header(header, tags):
         if speaker_name[-1:] in string.punctuation:
             speaker_name = speaker_name[:-1].strip()
         tags.add((speaker_name, SPEAKER_TAG))
-    return tags
+    return tags, locations
 
 
 def check_noun(word):
@@ -262,12 +260,13 @@ def check_noun(word):
         return "person"
 
 
-def rel_extract(body, tags):
+def rel_extract(body, tags, locations):
     """
     Performs relation extraction on the body, to try and pull out relevant information.
     :param body: The email body.
     :param tags: A list of accumulated strings which have been tagged so far.
-    :return: The updated list of accumulated tagged strings.
+    :param locations: List of previously found locations.
+    :return: The updated list of accumulated tagged strings, and the updated known locations.
     """
     find_rels = re.search(
         r'((\w*\s*)?\w*)(\s*from\s*((the)?\s*university\s*of\s*\w*|\w*\s*university))?\s*(will|is\sgoing\sto)\s*('
@@ -326,13 +325,15 @@ def rel_extract(body, tags):
         location = find_rels.group(3)
         tags.add((location, LOCATION_TAG))
         locations.add(location)
-    return tags
+    return tags, locations
 
 
-def tag_sents_and_paras(text):
+def tag_sents_and_paras(text, sentence_length_lower_bound, sentence_length_upper_bound):
     """
     Tags the sentences and paragraphs in the body.
     :param text: The text to tag.
+    :param sentence_length_lower_bound: Lower bound of accepted sentence length in a paragraph.
+    :param sentence_length_upper_bound: Upper bound of accepted sentence length in a paragraph.
     :return: The list of tokens with paragraph and sentence tags added.
     """
     '''
@@ -460,12 +461,13 @@ def find_names(text, tags):
     return tags
 
 
-def find_locations(text, tags):
+def find_locations(text, tags, locations):
     """
     Searches the text for previously identified locations, if no other location has been found.
     :param text: The text to search.
     :param tags: A list of accumulated strings which have been tagged so far.
-    :return: The updated list of accumulated tags.
+    :param locations: List of previously found locations.
+    :return: The updated list of accumulated tags, and updated known locations.
     """
     lower_text = text.lower()
     for location in locations:
@@ -481,6 +483,11 @@ def tag_email(email_text):
     :param email_text: The email to tag.
     :return: The tagged email.
     """
+
+    sentence_length_lower_bound, sentence_length_upper_bound = train_para_tagger()
+
+    locations = train_location_tagger()
+
     '''
     Split the email into header and body.
     return value is: (header, body)
@@ -490,14 +497,14 @@ def tag_email(email_text):
     body = formatted[1]
 
     tags = set([])
-    tags = check_header(header, tags)
+    tags, locations = check_header(header, tags, locations)
 
     # A lot of emails have nested headers
-    tags = check_header(body, tags)
+    tags, locations = check_header(body, tags, locations)
 
-    sent_and_para_tagged = tag_sents_and_paras(body)
+    sent_and_para_tagged = tag_sents_and_paras(body, sentence_length_lower_bound, sentence_length_upper_bound)
 
-    tags = rel_extract(body, tags)
+    tags, locations = rel_extract(body, tags, locations)
 
     # if we haven't found either a speaker or a location we can fall back on the backup-methods
     speaker_tagged = False
@@ -517,8 +524,8 @@ def tag_email(email_text):
         tags = find_names(body, tags)
         tags = find_names(header, tags)
     if not location_tagged:
-        tags = find_locations(body, tags)
-        tags = find_locations(header, tags)
+        tags = find_locations(body, tags, locations)
+        tags = find_locations(header, tags, locations)
 
     # tag all the information
     info_tagged = tag_body(detokenize(sent_and_para_tagged), tags)
