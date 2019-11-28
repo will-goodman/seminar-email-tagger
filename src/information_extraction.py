@@ -28,7 +28,8 @@ TRAIN_SENTS = treebank.tagged_sents()
 UNIGRAM = UnigramTagger(TRAIN_SENTS, backoff=DefaultTagger('NN'))
 BIGRAM = BigramTagger(TRAIN_SENTS, backoff=UNIGRAM)
 TRIGRAM = TrigramTagger(TRAIN_SENTS, backoff=BIGRAM)
-NAMES = names.words('male.txt') + names.words('female.txt') + names.words('family.txt')
+with open("../resources/family.txt") as family_file:
+    NAMES = names.words('male.txt') + names.words('female.txt') + family_file.read().splitlines()
 
 
 def format_file(file):
