@@ -1,4 +1,11 @@
-/resources/
-/tagged/
+tagged/*
 /.idea/
-/src/file_locations.py
+training/tagged/*
+test/tagged/*
+test/untagged/*
+
+
+!/training/tagged/example_training_tagged.txt
+!/test/tagged/example_test_tagged.txt
+!/test/untagged/example_test_untagged.txt
+!/tagged/.gitkeep
