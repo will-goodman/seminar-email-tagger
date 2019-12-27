@@ -4,7 +4,7 @@ Python code using the NLTK library to perform Entity Tagging and Ontology taggin
 ## Entity Tagging/Information Extraction
 The program performs Information Extraction on the emails, and then tags the information it has retrieved.
 
-This has been evaluated on sample emails, with evaluate_information_extraction.py to achieve the following results.
+This has been evaluated on sample emails, with evaluate_information_extraction.py, to achieve the following results.
 
 | Tag | Precision | Recall | F-Measure | Techniques |
 | --- | --------- | ------ | --------- | ---------- |
