@@ -1,6 +1,5 @@
 tagged/*
 /.idea/
-/src/file_locations.py
 training/tagged/*
 test/tagged/*
 test/untagged/*
